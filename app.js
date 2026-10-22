@@ -8,24 +8,10 @@ const STAT_FLUSH_AT = 5; // 풀이 기록은 이 개수만큼 모이면 한 번�
 
 /* ================= utils ================= */
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const inline = h => h.replace(/`([^`\n]+)`/g, '<code>$1</code>').replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
-function fmt(src) {
-  const parts = String(src ?? '').split('```');
-  if (parts.length % 2 === 0) { const last = parts.pop(); parts[parts.length - 1] += '```' + last; }
-  return parts.map((p, i) => {
-    if (i % 2) {
-      p = p.replace(/^[\w+#.-]*[ \t]*\n/, '').replace(/\n$/, '');
-      return `<pre class="code"><code>${esc(p)}</code></pre>`;
-    }
-    if (i > 0) p = p.replace(/^\n/, '');
-    if (i < parts.length - 1) p = p.replace(/\n$/, '');
-    return inline(esc(p));
-  }).join('');
-}
-const preview = s => String(s || '').replace(/```[\s\S]*?(```|$)/g, ' [코드] ').replace(/\*\*|`/g, '').replace(/\s+/g, ' ').trim();
-const answerText = a => String(a ?? '').split('|').map(x => x.trim()).filter(Boolean).join(' / ');
-const norm = s => String(s).normalize('NFC').toLowerCase().replace(/\s+/g, '');
-const accepts = (ans, typed) => String(ans).split('|').some(a => a.trim() && norm(a) === norm(typed));
+// 서식: **굵게**, __밑줄__ (줄을 넘지 않음, 중첩 가능)
+const fmt = s => esc(s).replace(/\*\*([^\n]+?)\*\*/g, '<strong>$1</strong>').replace(/__([^\n]+?)__/g, '<u>$1</u>');
+const hasMarks = s => /\*\*[^\n]+?\*\*|__[^\n]+?__/.test(s);
+const plain = s => String(s || '').replace(/\*\*|__/g, '').replace(/\s+/g, ' ').trim();
 const newId = () => 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const clone = o => (o == null ? o : JSON.parse(JSON.stringify(o)));
@@ -68,39 +54,36 @@ const files = {
 };
 let pending = {}; // 아직 커밋 안 된 풀이 기록: id -> { tries, correct, last, lastAt }
 
-// 파일 형식 <-> 앱 내부 형식. 파일의 객관식 answer는 1부터 시작하는 보기 번호.
+// 파일 형식 <-> 앱 내부 형식. 파일의 answer는 1부터 시작하는 보기 번호.
 function fromFile(data) {
   const arr = data && Array.isArray(data.problems) ? data.problems : [];
   const seen = new Set();
   return arr.map((raw, i) => {
     const p = raw && typeof raw === 'object' ? raw : {};
     const choices = Array.isArray(p.choices) ? p.choices.map(c => String(c ?? '')) : [];
-    const type = p.type === 'mc' || p.type === 'sa' ? p.type : (choices.length ? 'mc' : 'sa');
     let id = String(p.id || ('h' + hash(String(p.question || '') + '#' + i)));
     while (seen.has(id)) id += '_';
     seen.add(id);
-    let answer;
-    if (type === 'mc') { const n = parseInt(p.answer, 10); answer = n >= 1 && n <= choices.length ? n - 1 : 0; }
-    else answer = String(p.answer ?? '');
+    const n = parseInt(p.answer, 10);
     return {
-      id, subject: String(p.subject || '').trim() || '미분류', type,
-      question: String(p.question || ''), choices: type === 'mc' ? choices : [], answer,
-      explanation: String(p.explanation || ''), createdAt: Number(p.createdAt) || 0, updatedAt: Number(p.updatedAt) || 0,
+      id, question: String(p.question || ''), choices,
+      answer: n >= 1 && n <= choices.length ? n - 1 : 0,
+      explanation: String(p.explanation || ''),
+      createdAt: Number(p.createdAt) || 0, updatedAt: Number(p.updatedAt) || 0,
     };
   });
 }
 function toFile(list) {
   return {
-    version: 1,
-    problems: list.map(p => {
-      const o = { id: p.id, subject: p.subject, type: p.type, question: p.question };
-      if (p.type === 'mc') { o.choices = p.choices; o.answer = p.answer + 1; } else o.answer = p.answer;
-      o.explanation = p.explanation; o.createdAt = p.createdAt; o.updatedAt = p.updatedAt;
-      return o;
-    }),
+    version: 2,
+    problems: list.map(p => ({
+      id: p.id, question: p.question, choices: p.choices, answer: p.answer + 1,
+      explanation: p.explanation, createdAt: p.createdAt, updatedAt: p.updatedAt,
+    })),
   };
 }
 const upsert = (list, p) => { const i = list.findIndex(x => x.id === p.id); if (i >= 0) list[i] = p; else list.push(p); return list; };
+const playable = p => p.choices.length >= 2;
 const statsFrom = d => (d && d.stats && typeof d.stats === 'object' ? d.stats : {});
 function mergeStats(base, delta) {
   const out = { ...base };
@@ -124,17 +107,12 @@ const pendingCount = () => Object.values(pending).reduce((a, d) => a + d.tries, 
 
 const state = {
   items: [], num: new Map(), ready: false, loadError: '',
-  view: 'bank', filterSubject: null, query: '', openId: null,
-  setup: { subject: null, scope: 'all', shuffle: true }, session: null,
+  view: 'bank', query: '', openId: null,
+  setup: { scope: 'all', shuffle: true }, session: null,
 };
 function recompute() {
   state.items = fromFile(files.problems.data);
   state.num = new Map(state.items.map((p, i) => [p.id, i + 1]));
-}
-function subjects() {
-  const m = new Map();
-  for (const p of state.items) m.set(p.subject, (m.get(p.subject) || 0) + 1);
-  return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0], 'ko'));
 }
 
 /* ================= GitHub Contents API ================= */
@@ -291,13 +269,10 @@ function recordStat(id, ok) {
   renderSync();
   if (pendingCount() >= STAT_FLUSH_AT) flushStats();
 }
-const label = p => `[${p.subject}] ${preview(p.question).slice(0, 40)}`;
+const label = p => plain(p.question).slice(0, 40);
 
 /* ================= views ================= */
-const els = {
-  bank: $('#bank'), solve: $('#solve'), toolbar: $('#toolbar'), list: $('#list'),
-  chips: $('#chips'), empty: $('#empty'), q: $('#q'),
-};
+const els = { bank: $('#bank'), solve: $('#solve'), toolbar: $('#toolbar'), list: $('#list'), empty: $('#empty'), q: $('#q') };
 const connectHTML = () => `<div class="empty"><p>${repoCfg && !token ? '토큰을 다시 입력해 주세요.' : '문제를 저장할 GitHub 저장소를 연결해 주세요.'}</p><button class="btn primary" data-action="settings">${repoCfg && !token ? '토큰 입력' : '연결하기'}</button></div>`;
 function setView(v) {
   state.view = v;
@@ -312,61 +287,49 @@ function render() {
   else if (!state.session || state.session.phase === 'setup') renderSetup();
   renderSync();
 }
+function choicesHTML(p) {
+  return `<ol class="dchoices">${p.choices.map((c, i) => {
+    const a = i === p.answer;
+    return `<li class="${a ? 'is-answer' : ''}"><span class="bubble${a ? ' filled' : ''}">${i + 1}</span><span class="rich">${fmt(c)}</span><span class="tag">${a ? '정답' : ''}</span></li>`;
+  }).join('')}</ol>`;
+}
 
 /* bank */
-function chipsHTML(selected) {
-  return `<button class="chip" aria-pressed="${!selected}" data-subj="">전체<span class="n">${state.items.length}</span></button>` +
-    subjects().map(([s, n]) => `<button class="chip" aria-pressed="${selected === s}" data-subj="${esc(s)}">${esc(s)}<span class="n">${n}</span></button>`).join('');
-}
 function renderBank() {
   els.toolbar.hidden = !cfg || !state.ready || (!!state.loadError && !state.items.length);
-  const clear = () => { els.chips.innerHTML = ''; els.list.innerHTML = ''; };
-  if (!cfg) { clear(); els.empty.innerHTML = connectHTML(); return; }
-  if (!state.ready) { clear(); els.empty.innerHTML = '<p class="muted empty">불러오는 중…</p>'; return; }
-  if (state.filterSubject && !state.items.some(p => p.subject === state.filterSubject)) state.filterSubject = null;
+  if (!cfg) { els.list.innerHTML = ''; els.empty.innerHTML = connectHTML(); return; }
+  if (!state.ready) { els.list.innerHTML = ''; els.empty.innerHTML = '<p class="muted empty">불러오는 중…</p>'; return; }
   if (!state.items.length) {
-    clear();
+    els.list.innerHTML = '';
     els.empty.innerHTML = state.loadError
       ? `<div class="empty"><p>문제를 불러오지 못했어요. ${esc(state.loadError)}</p><div class="row-actions"><button class="btn primary" data-action="reload">다시 불러오기</button><button class="btn" data-action="settings">설정</button></div></div>`
       : '<div class="empty"><p>아직 등록한 문제가 없어요.</p><button class="btn primary" data-action="new">첫 문제 등록하기</button></div>';
     return;
   }
-  els.chips.innerHTML = chipsHTML(state.filterSubject);
   const q = state.query.trim().toLowerCase();
-  const hay = p => [p.subject, p.question, p.explanation, ...p.choices, p.type === 'sa' ? p.answer : ''].join('\n').toLowerCase();
-  const list = state.items.filter(p => (!state.filterSubject || p.subject === state.filterSubject) && (!q || hay(p).includes(q)));
-  els.empty.innerHTML = list.length ? '' : '<p class="muted empty">조건에 맞는 문제가 없어요.</p>';
+  const hay = p => plain([p.question, p.explanation, ...p.choices].join('\n')).toLowerCase();
+  const list = q ? state.items.filter(p => hay(p).includes(q)) : state.items;
+  els.empty.innerHTML = list.length ? '' : '<p class="muted empty">검색 결과가 없어요.</p>';
   els.list.innerHTML = list.map(itemHTML).join('');
 }
 function itemHTML(p) {
   const open = state.openId === p.id;
   const st = statOf(p.id);
   const score = st.tries ? `${st.correct}/${st.tries}` : '';
+  const flags = (st.last === 'x' ? '<span class="lastx">최근 오답</span>' : '') + (playable(p) ? '' : '<span class="lastx">보기가 부족해요</span>');
   return `<li class="item" data-id="${esc(p.id)}">
     <button class="item-head" data-action="toggle" aria-expanded="${open}">
       <span class="num">${state.num.get(p.id)}</span>
-      <span>
-        <span class="meta"><span class="subj">${esc(p.subject)}</span><span>${p.type === 'mc' ? '객관식' : '주관식'}</span>${st.last === 'x' ? '<span class="lastx">최근 오답</span>' : ''}</span>
-        <span class="preview">${esc(preview(p.question))}</span>
-      </span>
+      <span>${flags ? `<span class="meta">${flags}</span>` : ''}<span class="preview">${fmt(p.question.replace(/\s+/g, ' '))}</span></span>
       <span class="score"${score ? ` title="${st.tries}번 풀어 ${st.correct}번 맞힘"` : ''}>${score}</span>
     </button>
     ${open ? `<div class="item-body">${detailHTML(p)}</div>` : ''}
   </li>`;
 }
 function detailHTML(p) {
-  let h = `<div class="rich serif qtext">${fmt(p.question)}</div>`;
-  if (p.type === 'mc') {
-    h += `<ol class="dchoices">${p.choices.map((c, i) => {
-      const a = i === p.answer;
-      return `<li class="${a ? 'is-answer' : ''}"><span class="bubble${a ? ' filled' : ''}">${i + 1}</span><span class="rich">${fmt(c)}</span><span class="tag">${a ? '정답' : ''}</span></li>`;
-    }).join('')}</ol>`;
-  } else {
-    h += `<p class="answer"><span class="label">정답</span><span class="rich">${fmt(answerText(p.answer))}</span></p>`;
-  }
+  let h = `<div class="rich serif qtext">${fmt(p.question)}</div>${choicesHTML(p)}`;
   if (p.explanation) h += `<div class="explain"><h4>해설</h4><div class="rich">${fmt(p.explanation)}</div></div>`;
-  h += '<div class="row-actions"><button class="btn small" data-action="edit">수정</button><button class="btn small danger" data-action="delete">삭제</button></div>';
-  return h;
+  return h + '<div class="row-actions"><button class="btn small" data-action="edit">수정</button><button class="btn small danger" data-action="delete">삭제</button></div>';
 }
 function deleteProblem(btn, id, after) {
   const p = state.items.find(x => x.id === id);
@@ -382,8 +345,6 @@ function deleteProblem(btn, id, after) {
     .catch(e => { toast(e.message); if (btn.isConnected) { btn.disabled = false; delete btn.dataset.armed; btn.textContent = '삭제'; } });
 }
 els.bank.addEventListener('click', e => {
-  const chip = e.target.closest('.chip');
-  if (chip) { state.filterSubject = chip.dataset.subj || null; renderBank(); return; }
   const a = e.target.closest('[data-action]');
   if (!a) return;
   const id = a.closest('.item')?.dataset.id;
@@ -401,7 +362,7 @@ els.q.addEventListener('input', () => { state.query = els.q.value; renderBank();
 /* solve: setup */
 function poolFor(st) {
   return state.items.filter(p => {
-    if (st.subject && p.subject !== st.subject) return false;
+    if (!playable(p)) return false;
     if (st.scope === 'all') return true;
     const s = statOf(p.id);
     return st.scope === 'wrong' ? s.last === 'x' : !s.tries;
@@ -415,11 +376,9 @@ function renderSetup() {
     els.solve.innerHTML = '<div class="empty"><p>풀 문제가 없어요. 먼저 문제를 등록해 주세요.</p><button class="btn primary" data-action="new">문제 등록하기</button></div>';
     return;
   }
-  if (st.subject && !state.items.some(p => p.subject === st.subject)) st.subject = null;
   const pool = poolFor(st);
   const why = st.scope === 'wrong' ? '최근에 틀린 문제가 없어요.' : st.scope === 'new' ? '안 푼 문제가 없어요.' : '';
   els.solve.innerHTML = `<div class="setup">
-    <div class="field"><span>과목</span><div class="chips wrapchips">${chipsHTML(st.subject)}</div></div>
     <div class="field"><span>범위</span><div class="seg" role="radiogroup" aria-label="범위">
       ${[['all', '전체'], ['wrong', '틀린 문제'], ['new', '안 푼 문제']].map(([k, l]) => `<button role="radio" aria-checked="${st.scope === k}" data-scope="${k}">${l}</button>`).join('')}
     </div></div>
@@ -433,75 +392,54 @@ function renderSetup() {
 function startSession(ids) {
   ids = ids || poolFor(state.setup).map(p => p.id);
   if (state.setup.shuffle) shuffle(ids);
-  state.session = { phase: 'q', queue: ids, idx: 0, results: [], sel: null, revealed: false, graded: null, typed: '' };
+  state.session = { phase: 'q', queue: ids, idx: 0, results: [], sel: null, revealed: false, graded: null };
   renderQuestion(); window.scrollTo(0, 0);
 }
 const current = () => state.items.find(p => p.id === state.session.queue[state.session.idx]);
 function renderQuestion(focusSel) {
   const s = state.session;
   let p = current();
-  while (!p && s.idx < s.queue.length - 1) { s.idx++; p = current(); }
-  if (!p) return renderSummary();
+  while ((!p || !playable(p)) && s.idx < s.queue.length - 1) { s.idx++; p = current(); }
+  if (!p || !playable(p)) return renderSummary();
   const total = s.queue.length, g = s.graded;
   const mark = g === null ? '' : `<svg viewBox="0 0 60 60" aria-hidden="true"><path pathLength="1" d="${g ? CIRCLE : SLASH}"/></svg>`;
-  let h = `<div class="progress"><span class="pnum">${s.idx + 1} / ${total}</span><span class="subj">${esc(p.subject)}</span><button class="link" data-action="quit">그만 풀기</button></div>
+  const choices = p.choices.map((c, i) => {
+    let cls = 'choice', tag = '';
+    if (s.revealed) {
+      if (i === p.answer) { cls += ' is-answer'; tag = '정답'; }
+      else if (i === s.sel) { cls += ' is-wrong'; tag = '내 답'; }
+    }
+    return `<button class="${cls}" role="radio" aria-checked="${s.sel === i}" data-i="${i}"${s.revealed ? ' aria-disabled="true"' : ''}><span class="bubble">${i + 1}</span><span class="rich">${fmt(c)}</span><span class="tag">${tag}</span></button>`;
+  }).join('');
+  const actions = !s.revealed
+    ? `<button class="btn ghost" data-action="idk">모르겠어요</button><button class="btn primary" data-action="check"${s.sel == null ? ' disabled' : ''}>정답 확인</button>`
+    : `<button class="btn primary" data-action="next">${s.idx + 1 >= total ? '결과 보기' : '다음 문제'}</button>`;
+  els.solve.innerHTML = `<div class="progress"><span class="pnum">${s.idx + 1} / ${total}</span><button class="link" data-action="quit">그만 풀기</button></div>
     <div class="bar"><i></i></div>
     <article class="paper">
       <div class="qhead"><span class="qnum" aria-label="${state.num.get(p.id)}번">${state.num.get(p.id)}${mark}</span>${g === null ? '' : `<span class="verdict">${g ? '맞았어요' : '틀렸어요'}</span>`}</div>
-      <div class="rich serif qtext">${fmt(p.question)}</div>`;
-  if (p.type === 'mc') {
-    h += `<div class="choices" role="radiogroup" aria-label="보기">${p.choices.map((c, i) => {
-      let cls = 'choice', tag = '';
-      if (s.revealed) {
-        if (i === p.answer) { cls += ' is-answer'; tag = '정답'; }
-        else if (i === s.sel) { cls += ' is-wrong'; tag = '내 답'; }
-      }
-      return `<button class="${cls}" role="radio" aria-checked="${s.sel === i}" data-i="${i}"${s.revealed ? ' aria-disabled="true"' : ''}><span class="bubble">${i + 1}</span><span class="rich">${fmt(c)}</span><span class="tag">${tag}</span></button>`;
-    }).join('')}</div>`;
-  } else {
-    h += `<label class="field sa"><span>내 답</span><textarea id="saInput" rows="2" placeholder="답을 적어 보세요. 비워 둬도 돼요."${s.revealed ? ' readonly' : ''}>${esc(s.typed)}</textarea></label>`;
-    if (s.revealed) h += `<p class="answer"><span class="label">정답</span><span class="rich">${fmt(answerText(p.answer))}</span></p>`;
-  }
-  if (s.revealed && p.explanation) h += `<div class="explain"><h4>해설</h4><div class="rich">${fmt(p.explanation)}</div></div>`;
-  h += `</article><div class="actions">${actionsHTML(p)}</div>`;
-  els.solve.innerHTML = h;
+      <div class="rich serif qtext">${fmt(p.question)}</div>
+      <div class="choices" role="radiogroup" aria-label="보기">${choices}</div>
+      ${s.revealed && p.explanation ? `<div class="explain"><h4>해설</h4><div class="rich">${fmt(p.explanation)}</div></div>` : ''}
+    </article>
+    <div class="actions">${actions}</div>`;
   $('.bar i', els.solve).style.width = `${((s.idx + (g === null ? 0 : 1)) / total) * 100}%`; // CSP: inline style 속성 대신 CSSOM
   if (focusSel != null) $(`.choice[data-i="${focusSel}"]`, els.solve)?.focus();
   else if (s.revealed) $('.actions .btn.primary', els.solve)?.focus({ preventScroll: true });
-}
-function actionsHTML(p) {
-  const s = state.session;
-  if (!s.revealed) {
-    const dis = p.type === 'mc' && s.sel == null ? ' disabled' : '';
-    return `<button class="btn ghost" data-action="idk">모르겠어요</button><button class="btn primary" data-action="check"${dis}>정답 확인</button>`;
-  }
-  if (s.graded === null) return '<span class="ask">내 답이 맞았나요?</span><button class="btn" data-action="self_x">틀렸어요</button><button class="btn primary" data-action="self_o">맞았어요</button>';
-  return `<button class="btn primary" data-action="next">${s.idx + 1 >= s.queue.length ? '결과 보기' : '다음 문제'}</button>`;
 }
 function select(i) { const s = state.session; if (s.revealed) return; s.sel = i; renderQuestion(i); }
 function check(idk) {
   const s = state.session, p = current();
   if (!p || s.revealed) return;
-  if (p.type === 'mc') {
-    if (idk) s.sel = null; else if (s.sel == null) return;
-    s.revealed = true; grade(p, !idk && s.sel === p.answer);
-  } else {
-    const ta = $('#saInput'); if (ta) s.typed = ta.value;
-    s.revealed = true;
-    if (idk) grade(p, false);
-    else if (s.typed.trim() && accepts(p.answer, s.typed)) grade(p, true);
-    else renderQuestion();
-  }
-}
-function grade(p, ok) {
-  const s = state.session;
-  s.graded = ok; s.results.push({ id: p.id, ok });
+  if (idk) s.sel = null; else if (s.sel == null) return;
+  const ok = !idk && s.sel === p.answer;
+  s.revealed = true; s.graded = ok; s.results.push({ id: p.id, ok });
   recordStat(p.id, ok);
   renderQuestion();
 }
 function next() {
   const s = state.session;
-  s.idx++; s.sel = null; s.revealed = false; s.graded = null; s.typed = '';
+  s.idx++; s.sel = null; s.revealed = false; s.graded = null;
   if (s.idx >= s.queue.length) renderSummary(); else renderQuestion();
   window.scrollTo(0, 0);
 }
@@ -530,8 +468,6 @@ els.solve.addEventListener('click', e => {
     const ch = t.closest('.choice');
     if (ch) { select(+ch.dataset.i); return; }
   } else {
-    const chip = t.closest('.chip');
-    if (chip) { state.setup.subject = chip.dataset.subj || null; renderSetup(); return; }
     const sc = t.closest('[data-scope]');
     if (sc) { state.setup.scope = sc.dataset.scope; renderSetup(); return; }
   }
@@ -543,8 +479,6 @@ els.solve.addEventListener('click', e => {
     case 'settings': openSettings(); break;
     case 'check': check(false); break;
     case 'idk': check(true); break;
-    case 'self_o': grade(current(), true); break;
-    case 'self_x': grade(current(), false); break;
     case 'next': next(); break;
     case 'quit': quit(); break;
     case 'home': state.session = null; renderSetup(); window.scrollTo(0, 0); break;
@@ -552,7 +486,6 @@ els.solve.addEventListener('click', e => {
   }
 });
 els.solve.addEventListener('change', e => { if (e.target.id === 'shuffle') state.setup.shuffle = e.target.checked; });
-els.solve.addEventListener('input', e => { if (e.target.id === 'saInput' && state.session) state.session.typed = e.target.value; });
 
 /* ================= overlays ================= */
 function showOverlay(el) { el.hidden = false; document.body.classList.add('locked'); }
@@ -562,31 +495,25 @@ function hideOverlay(el) {
 }
 
 /* editor */
-const ed = { el: $('#editor'), id: null, base: null, kind: 'mc', choices: [], answer: null, dirty: false, armed: false, busy: false, lastSubject: '', lastKind: 'mc' };
+const ed = { el: $('#editor'), id: null, base: null, choices: [], answer: null, dirty: false, armed: false, busy: false, field: null };
+const FMT_FIELDS = '#edQ, #edExp, #edChoices input';
 function openEditor(p) {
   if (!cfg) { openSettings(); return; }
   ed.id = p ? p.id : null; ed.base = p || null;
-  ed.kind = p ? p.type : ed.lastKind;
-  ed.choices = p && p.type === 'mc' ? [...p.choices] : ['', '', '', ''];
-  ed.answer = p && p.type === 'mc' ? p.answer : null;
+  ed.choices = p && p.choices.length ? [...p.choices] : ['', '', '', ''];
+  while (ed.choices.length < 2) ed.choices.push('');
+  ed.answer = p && p.choices.length ? p.answer : null;
   $('#edTitle').textContent = p ? `${state.num.get(p.id)}번 문제 수정` : '새 문제';
-  $('#edSubject').value = p ? p.subject : (ed.lastSubject || state.filterSubject || '');
   $('#edQ').value = p ? p.question : '';
-  $('#edAnswer').value = p && p.type === 'sa' ? p.answer : '';
   $('#edExp').value = p ? p.explanation : '';
   const del = $('#edDelete');
   del.hidden = !p; del.disabled = false; del.textContent = '삭제'; delete del.dataset.armed;
   $('#edSaveNext').hidden = !!p;
-  $('#edErr').textContent = ''; ed.dirty = false; ed.armed = false; setBusy(false);
-  $('#subjectList').innerHTML = subjects().map(([s]) => `<option value="${esc(s)}">`).join('');
-  renderKind(); renderChoices();
+  $('#edErr').textContent = ''; ed.dirty = false; ed.armed = false; ed.field = null; setBusy(false);
+  renderChoices(); renderPreview();
   showOverlay(ed.el);
   $('#editor .sheet-body').scrollTop = 0;
-  setTimeout(() => ($('#edSubject').value ? $('#edQ') : $('#edSubject')).focus({ preventScroll: true }), 40);
-}
-function renderKind() {
-  ed.el.querySelectorAll('[data-kind]').forEach(b => b.setAttribute('aria-checked', String(b.dataset.kind === ed.kind)));
-  $('#edMc').hidden = ed.kind !== 'mc'; $('#edSa').hidden = ed.kind !== 'sa';
+  setTimeout(() => $('#edQ').focus({ preventScroll: true }), 40);
 }
 function renderChoices() {
   const few = ed.choices.length <= 2;
@@ -597,6 +524,32 @@ function renderChoices() {
     </div>`).join('');
   $('#edAddChoice').hidden = ed.choices.length >= 6;
 }
+// 서식 표기가 들어 있을 때만 렌더링 결과를 보여 준다
+function renderPreview() {
+  const q = $('#edQ').value;
+  const show = hasMarks(q) || ed.choices.some(hasMarks);
+  $('#edPreviewWrap').hidden = !show;
+  if (show) $('#edPreview').innerHTML = `<div class="rich serif qtext">${fmt(q)}</div>${choicesHTML({ choices: ed.choices.filter(c => c.trim()), answer: -1 })}`;
+}
+// 선택 영역을 mark로 감싸거나, 이미 감싸져 있으면 벗긴다
+function applyFmt(el, mark) {
+  if (!el) return;
+  const v = el.value, L = mark.length;
+  let s = el.selectionStart ?? v.length, e = el.selectionEnd ?? v.length;
+  while (s < e && /\s/.test(v[s])) s++;
+  while (e > s && /\s/.test(v[e - 1])) e--;
+  if (s >= L && v.slice(s - L, s) === mark && v.slice(e, e + L) === mark) {
+    el.setRangeText(v.slice(s, e), s - L, e + L, 'select');
+  } else if (e - s > 2 * L && v.slice(s, s + L) === mark && v.slice(e - L, e) === mark) {
+    el.setRangeText(v.slice(s + L, e - L), s, e, 'select');
+  } else {
+    el.setRangeText(mark + v.slice(s, e) + mark, s, e, 'end');
+    el.setSelectionRange(s + L, e + L);
+  }
+  el.focus();
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+}
+const fmtTarget = () => (ed.field && ed.field.isConnected ? ed.field : $('#edQ'));
 function setBusy(b) {
   ed.busy = b;
   $('#edSave').disabled = b; $('#edSaveNext').disabled = b;
@@ -614,24 +567,16 @@ function tryCloseEditor() {
 async function saveEditor(andNext) {
   if (ed.busy) return;
   const err = m => { $('#edErr').textContent = m; };
-  const subject = $('#edSubject').value.trim() || '미분류';
   const question = $('#edQ').value.trim();
   const explanation = $('#edExp').value.trim();
   if (!question) return err('문제를 입력해 주세요.');
-  let choices = [], answer;
-  if (ed.kind === 'mc') {
-    const rows = ed.choices.map((c, i) => ({ t: c.trim(), a: i === ed.answer })).filter(r => r.t);
-    if (rows.length < 2) return err('보기를 두 개 이상 입력해 주세요.');
-    answer = rows.findIndex(r => r.a);
-    if (answer < 0) return err(ed.answer == null ? '정답인 보기의 번호를 눌러 표시해 주세요.' : '정답으로 고른 보기가 비어 있어요.');
-    choices = rows.map(r => r.t);
-  } else {
-    answer = $('#edAnswer').value.trim();
-    if (!answer) return err('정답을 입력해 주세요.');
-  }
+  const rows = ed.choices.map((c, i) => ({ t: c.trim(), a: i === ed.answer })).filter(r => r.t);
+  if (rows.length < 2) return err('보기를 두 개 이상 입력해 주세요.');
+  const answer = rows.findIndex(r => r.a);
+  if (answer < 0) return err(ed.answer == null ? '정답인 보기의 번호를 눌러 표시해 주세요.' : '정답으로 고른 보기가 비어 있어요.');
   const now = Date.now(), base = ed.base;
   const p = {
-    id: ed.id || newId(), subject, type: ed.kind, question, choices, answer, explanation,
+    id: ed.id || newId(), question, choices: rows.map(r => r.t), answer, explanation,
     createdAt: base ? base.createdAt || now : now, updatedAt: now,
   };
   err(''); setBusy(true);
@@ -642,19 +587,20 @@ async function saveEditor(andNext) {
     return err(`저장하지 못했어요. ${e.message}`);
   }
   setBusy(false);
-  ed.lastSubject = subject; ed.lastKind = ed.kind;
   if (andNext) { openEditor(); toast('저장했어요. 다음 문제를 입력하세요.'); }
   else { hideOverlay(ed.el); toast(base ? '수정했어요' : '저장했어요'); }
 }
+ed.el.addEventListener('focusin', e => { if (e.target.matches(FMT_FIELDS)) ed.field = e.target; });
 ed.el.addEventListener('input', e => {
   ed.dirty = true;
   if (e.target.dataset.ci != null) ed.choices[+e.target.dataset.ci] = e.target.value;
+  if (e.target.id === 'edQ' || e.target.dataset.ci != null) renderPreview();
 });
 ed.el.addEventListener('click', e => {
   const t = e.target;
   if (t === ed.el) { tryCloseEditor(); return; }
-  const k = t.closest('[data-kind]');
-  if (k) { ed.kind = k.dataset.kind; ed.dirty = true; renderKind(); return; }
+  const f = t.closest('[data-fmt]');
+  if (f) { applyFmt(fmtTarget(), f.dataset.fmt === 'b' ? '**' : '__'); return; }
   const a = t.closest('[data-ans]');
   if (a) { ed.answer = +a.dataset.ans; ed.dirty = true; renderChoices(); return; }
   const r = t.closest('[data-rm]');
@@ -662,9 +608,11 @@ ed.el.addEventListener('click', e => {
     const i = +r.dataset.rm;
     ed.choices.splice(i, 1);
     if (ed.answer === i) ed.answer = null; else if (ed.answer != null && ed.answer > i) ed.answer--;
-    ed.dirty = true; renderChoices();
+    ed.dirty = true; renderChoices(); renderPreview();
   }
 });
+// 서식 버튼을 눌러도 입력란의 포커스와 선택 영역이 유지되도록
+ed.el.querySelectorAll('[data-fmt]').forEach(b => b.addEventListener('mousedown', e => e.preventDefault()));
 $('#edAddChoice').addEventListener('click', () => { ed.choices.push(''); renderChoices(); $(`[data-ci="${ed.choices.length - 1}"]`).focus(); });
 $('#edClose').addEventListener('click', tryCloseEditor);
 $('#edSave').addEventListener('click', () => saveEditor(false));
@@ -727,7 +675,7 @@ async function saveSettings() {
     if (changed) {
       for (const f of Object.values(files)) Object.assign(f, { data: null, sha: null, loaded: false });
       pending = {}; state.ready = false; state.loadError = ''; state.openId = null; state.session = null;
-      state.filterSubject = null; recompute();
+      recompute();
     }
     hideOverlay(st.el);
     toast(info.private ? '연결했어요' : '연결했어요. 공개 저장소라서 데이터가 누구에게나 보여요.');
@@ -764,19 +712,21 @@ document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () =>
 document.addEventListener('keydown', e => {
   if (!st.el.hidden) { if (e.key === 'Escape') hideOverlay(st.el); return; }
   if (!ed.el.hidden) {
+    const mod = e.metaKey || e.ctrlKey, k = e.key.toLowerCase();
     if (e.key === 'Escape') tryCloseEditor();
-    else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); saveEditor(false); }
+    else if (mod && e.key === 'Enter') { e.preventDefault(); saveEditor(false); }
+    else if (mod && (k === 'b' || k === 'u') && e.target.matches(FMT_FIELDS)) { e.preventDefault(); applyFmt(e.target, k === 'b' ? '**' : '__'); }
     return;
   }
   const s = state.session;
   if (state.view !== 'solve' || !s || s.phase !== 'q') return;
-  const inText = e.target.matches('textarea,input');
-  if (!inText && /^[1-9]$/.test(e.key)) {
+  if (e.target.matches('textarea,input')) return;
+  if (/^[1-9]$/.test(e.key)) {
     const p = current();
-    if (p && p.type === 'mc' && !s.revealed && +e.key <= p.choices.length) select(+e.key - 1);
+    if (p && !s.revealed && +e.key <= p.choices.length) select(+e.key - 1);
     return;
   }
-  if (e.key === 'Enter' && !e.target.closest('button') && (!inText || e.metaKey || e.ctrlKey)) {
+  if (e.key === 'Enter' && !e.target.closest('button')) {
     const b = $('.actions .btn.primary', els.solve);
     if (b && !b.disabled) { e.preventDefault(); b.click(); }
   }

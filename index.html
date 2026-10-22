@@ -41,7 +41,6 @@
       <input id="q" type="search" placeholder="문제·해설 검색" aria-label="문제 검색" autocomplete="off">
       <button class="btn primary" data-action="new">새 문제</button>
     </div>
-    <div id="chips" class="chips" aria-label="과목"></div>
     <ol id="list" class="list"></ol>
     <div id="empty"></div>
   </section>
@@ -54,29 +53,23 @@
       <h2 id="edTitle">새 문제</h2>
       <button class="icon" id="edClose" type="button" aria-label="닫기">✕</button>
     </div>
+    <div class="fmtbar" role="toolbar" aria-label="서식">
+      <button type="button" data-fmt="b" aria-label="굵게" title="굵게 (Ctrl/⌘+B)"><strong>B</strong></button>
+      <button type="button" data-fmt="u" aria-label="밑줄" title="밑줄 (Ctrl/⌘+U)"><u>U</u></button>
+      <span class="hint">글자를 선택하고 누르세요</span>
+    </div>
     <div class="sheet-body">
-      <label class="field"><span>과목</span>
-        <input id="edSubject" type="text" list="subjectList" placeholder="예: 운영체제" autocomplete="off">
-        <datalist id="subjectList"></datalist>
-      </label>
-      <div class="field"><span>유형</span>
-        <div class="seg" role="radiogroup" aria-label="유형">
-          <button type="button" role="radio" data-kind="mc">객관식</button>
-          <button type="button" role="radio" data-kind="sa">주관식</button>
-        </div>
-      </div>
       <label class="field"><span>문제</span>
         <textarea id="edQ" rows="5" class="serif"></textarea>
-        <span class="hint"><code>```</code>로 감싸면 코드 블록, <code>`코드`</code>, <code>**굵게**</code>를 쓸 수 있어요.</span>
+        <span class="hint">직접 <code>**굵게**</code>, <code>__밑줄__</code>로 써도 돼요.</span>
       </label>
-      <div class="field" id="edMc"><span>보기<small>정답인 보기의 번호를 눌러 표시하세요.</small></span>
+      <div class="field"><span>보기<small>정답인 보기의 번호를 눌러 표시하세요.</small></span>
         <div id="edChoices"></div>
         <button type="button" id="edAddChoice" class="btn ghost small">보기 추가</button>
       </div>
-      <label class="field" id="edSa"><span>정답</span>
-        <input id="edAnswer" type="text" autocomplete="off">
-        <span class="hint">여러 답을 인정하려면 | 로 구분하세요. 예: 스택|stack</span>
-      </label>
+      <div class="field" id="edPreviewWrap" hidden><span>미리보기</span>
+        <div id="edPreview" class="preview-box"></div>
+      </div>
       <label class="field"><span>해설</span>
         <textarea id="edExp" rows="5"></textarea>
       </label>

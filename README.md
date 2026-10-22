@@ -26,24 +26,14 @@ GitHub Pages에서 동작하는 개인용 문제은행 웹앱입니다. 문제�
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "problems": [
     {
       "id": "p01",
-      "subject": "운영체제",
-      "type": "mc",
-      "question": "다음 중 CPU 스케줄링 알고리즘이 아닌 것은?",
-      "choices": ["FCFS", "SJF", "LRU", "Round Robin"],
-      "answer": 3,
-      "explanation": "LRU는 페이지 교체 알고리즘이다."
-    },
-    {
-      "id": "p02",
-      "subject": "자료구조",
-      "type": "sa",
-      "question": "LIFO 방식으로 동작하는 자료구조는?",
-      "answer": "스택|stack",
-      "explanation": ""
+      "question": "밑줄 친 부분과 의미가 같은 것은?\nElla __habla__ español muy bien.",
+      "choices": ["**come**", "dice", "corre", "duerme"],
+      "answer": 2,
+      "explanation": "hablar = 말하다, decir = 말하다"
     }
   ]
 }
@@ -51,11 +41,12 @@ GitHub Pages에서 동작하는 개인용 문제은행 웹앱입니다. 문제�
 
 | 필드 | 설명 |
 |---|---|
-| `type` | `"mc"` 객관식, `"sa"` 주관식 |
-| `answer` | 객관식은 정답 보기 번호(**1부터**), 주관식은 문자열이며 여러 답은 `\|`로 구분 |
-| `question`, `explanation` | ` ``` ` 코드 블록, `` `코드` ``, `**굵게**` 사용 가능 |
+| `answer` | 정답 보기 번호(**1부터**) |
+| `question`, `choices`, `explanation` | `**굵게**`, `__밑줄__` 사용 가능. 한 줄 안에서만 적용되고, 겹쳐 쓸 수도 있습니다(`**__굵은 밑줄__**`) |
 | `id` | 생략하면 앱이 다음 저장 때 채워 넣습니다. 중복만 피하면 됩니다 |
 | `createdAt`, `updatedAt` | 앱이 기록하며, 생략해도 됩니다 |
+
+보기가 2개 미만인 문제는 목록에 "보기가 부족해요"로 표시되고 풀기에서 제외됩니다.
 
 `stats.json`(문제별 풀이 횟수, 정답 수, 최근 결과)은 앱이 관리하므로 직접 수정할 필요가 없습니다.
 
