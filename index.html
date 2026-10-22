@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://api.github.com; img-src 'self' data:; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<title>문제은행</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="theme-color" content="#F4F5F7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#121419" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-title" content="문제은행">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600&family=Nanum+Myeongjo:wght@400;700;800&display=swap">
+<link rel="stylesheet" href="style.css">
+<script src="app.js" defer></script>
+</head>
+<body>
+<header class="top">
+  <div class="top-inner">
+    <h1 class="brand">문제은행</h1>
+    <div class="top-right">
+      <button id="syncBtn" class="sync" type="button" aria-label="동기화 상태와 GitHub 설정"></button>
+      <nav class="seg" role="tablist" aria-label="화면">
+        <button class="tab" role="tab" data-view="bank" aria-selected="true">문제</button>
+        <button class="tab" role="tab" data-view="solve" aria-selected="false">풀기</button>
+      </nav>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <section id="bank">
+    <div id="toolbar" class="toolbar">
+      <input id="q" type="search" placeholder="문제·해설 검색" aria-label="문제 검색" autocomplete="off">
+      <button class="btn primary" data-action="new">새 문제</button>
+    </div>
+    <div id="chips" class="chips" aria-label="과목"></div>
+    <ol id="list" class="list"></ol>
+    <div id="empty"></div>
+  </section>
+  <section id="solve" hidden></section>
+</main>
+
+<div id="editor" class="overlay" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="edTitle">
+    <div class="sheet-head">
+      <h2 id="edTitle">새 문제</h2>
+      <button class="icon" id="edClose" type="button" aria-label="닫기">✕</button>
+    </div>
+    <div class="sheet-body">
+      <label class="field"><span>과목</span>
+        <input id="edSubject" type="text" list="subjectList" placeholder="예: 운영체제" autocomplete="off">
+        <datalist id="subjectList"></datalist>
+      </label>
+      <div class="field"><span>유형</span>
+        <div class="seg" role="radiogroup" aria-label="유형">
+          <button type="button" role="radio" data-kind="mc">객관식</button>
+          <button type="button" role="radio" data-kind="sa">주관식</button>
+        </div>
+      </div>
+      <label class="field"><span>문제</span>
+        <textarea id="edQ" rows="5" class="serif"></textarea>
+        <span class="hint"><code>```</code>로 감싸면 코드 블록, <code>`코드`</code>, <code>**굵게**</code>를 쓸 수 있어요.</span>
+      </label>
+      <div class="field" id="edMc"><span>보기<small>정답인 보기의 번호를 눌러 표시하세요.</small></span>
+        <div id="edChoices"></div>
+        <button type="button" id="edAddChoice" class="btn ghost small">보기 추가</button>
+      </div>
+      <label class="field" id="edSa"><span>정답</span>
+        <input id="edAnswer" type="text" autocomplete="off">
+        <span class="hint">여러 답을 인정하려면 | 로 구분하세요. 예: 스택|stack</span>
+      </label>
+      <label class="field"><span>해설</span>
+        <textarea id="edExp" rows="5"></textarea>
+      </label>
+      <p id="edErr" class="err" role="alert"></p>
+    </div>
+    <div class="sheet-foot">
+      <button type="button" id="edDelete" class="btn danger">삭제</button>
+      <span class="spacer"></span>
+      <button type="button" id="edSaveNext" class="btn">저장하고 새 문제</button>
+      <button type="button" id="edSave" class="btn primary">저장</button>
+    </div>
+  </div>
+</div>
+
+<div id="settings" class="overlay" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="stTitle">
+    <div class="sheet-head">
+      <h2 id="stTitle">GitHub 연결</h2>
+      <button class="icon" id="stClose" type="button" aria-label="닫기">✕</button>
+    </div>
+    <div class="sheet-body">
+      <p class="intro">문제는 내 GitHub 저장소의 <code>problems.json</code>과 <code>stats.json</code>에만 저장돼요. 이 기기에는 토큰 말고는 아무것도 남지 않아요.</p>
+      <label class="field"><span>데이터 저장소</span>
+        <input id="stRepo" type="text" placeholder="아이디/저장소" autocomplete="off" autocapitalize="off" spellcheck="false">
+        <span class="hint">예: myname/qbank-data. 비공개 저장소를 쓰세요.</span>
+      </label>
+      <label class="field"><span>토큰</span>
+        <input id="stToken" type="password" placeholder="github_pat_…" autocomplete="off" autocapitalize="off" spellcheck="false">
+        <span class="hint">데이터 저장소 하나에만 Contents 읽기·쓰기 권한을 준 fine-grained 토큰을 쓰세요. <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener noreferrer">토큰 만들기</a></span>
+      </label>
+      <label class="check"><input type="checkbox" id="stRemember" checked>이 기기에 토큰 기억하기</label>
+      <p class="hint remember-hint">끄면 앱을 닫을 때 토큰이 지워지고, 열 때마다 다시 입력해야 해요.</p>
+      <label class="field"><span>브랜치<small>비워 두면 기본 브랜치를 써요.</small></span>
+        <input id="stBranch" type="text" placeholder="main" autocomplete="off" autocapitalize="off" spellcheck="false">
+      </label>
+      <p id="stMsg" class="err" role="alert"></p>
+      <div id="stConnected" hidden>
+        <p id="stInfo" class="info"></p>
+        <div class="row-actions">
+          <button type="button" class="btn small" id="stSync">지금 동기화</button>
+          <button type="button" class="btn small danger" id="stLogout">이 기기에서 연결 해제</button>
+        </div>
+      </div>
+    </div>
+    <div class="sheet-foot">
+      <span class="spacer"></span>
+      <button type="button" id="stSave" class="btn primary">연결</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>
