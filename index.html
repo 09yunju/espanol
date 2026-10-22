@@ -53,15 +53,17 @@
       <h2 id="edTitle">새 문제</h2>
       <button class="icon" id="edClose" type="button" aria-label="닫기">✕</button>
     </div>
-    <div class="fmtbar" role="toolbar" aria-label="서식">
+    <div class="fmtbar" role="toolbar" aria-label="서식과 기호">
       <button type="button" data-fmt="b" aria-label="굵게" title="굵게 (Ctrl/⌘+B)"><strong>B</strong></button>
       <button type="button" data-fmt="u" aria-label="밑줄" title="밑줄 (Ctrl/⌘+U)"><u>U</u></button>
-      <span class="hint">글자를 선택하고 누르세요</span>
+      <span class="sep" aria-hidden="true"></span>
+      <button type="button" data-ch="á" aria-label="á 입력">á</button><button type="button" data-ch="é" aria-label="é 입력">é</button><button type="button" data-ch="í" aria-label="í 입력">í</button><button type="button" data-ch="ó" aria-label="ó 입력">ó</button><button type="button" data-ch="ú" aria-label="ú 입력">ú</button><button type="button" data-ch="ü" aria-label="ü 입력">ü</button><button type="button" data-ch="ñ" aria-label="ñ 입력">ñ</button><button type="button" data-ch="¿" aria-label="¿ 입력">¿</button><button type="button" data-ch="¡" aria-label="¡ 입력">¡</button>
+      <button type="button" data-shift aria-pressed="false" aria-label="다음 글자 대문자" title="다음 한 글자를 대문자로">⇧</button>
     </div>
     <div class="sheet-body">
       <label class="field"><span>문제</span>
         <textarea id="edQ" rows="5" class="serif"></textarea>
-        <span class="hint">직접 <code>**굵게**</code>, <code>__밑줄__</code>로 써도 돼요.</span>
+        <span class="hint">글자를 선택하고 B나 U를 누르거나, 직접 <code>**굵게**</code>, <code>__밑줄__</code>로 써도 돼요.</span>
       </label>
       <div class="field"><span>보기<small>정답인 보기의 번호를 눌러 표시하세요.</small></span>
         <div id="edChoices"></div>

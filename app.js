@@ -12,6 +12,7 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const fmt = s => esc(s).replace(/\*\*([^\n]+?)\*\*/g, '<strong>$1</strong>').replace(/__([^\n]+?)__/g, '<u>$1</u>');
 const hasMarks = s => /\*\*[^\n]+?\*\*|__[^\n]+?__/.test(s);
 const plain = s => String(s || '').replace(/\*\*|__/g, '').replace(/\s+/g, ' ').trim();
+const fold = s => String(s).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase(); // 검색: á→a, ñ→n
 const newId = () => 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const clone = o => (o == null ? o : JSON.parse(JSON.stringify(o)));
@@ -306,8 +307,8 @@ function renderBank() {
       : '<div class="empty"><p>아직 등록한 문제가 없어요.</p><button class="btn primary" data-action="new">첫 문제 등록하기</button></div>';
     return;
   }
-  const q = state.query.trim().toLowerCase();
-  const hay = p => plain([p.question, p.explanation, ...p.choices].join('\n')).toLowerCase();
+  const q = fold(state.query.trim());
+  const hay = p => fold(plain([p.question, p.explanation, ...p.choices].join('\n')));
   const list = q ? state.items.filter(p => hay(p).includes(q)) : state.items;
   els.empty.innerHTML = list.length ? '' : '<p class="muted empty">검색 결과가 없어요.</p>';
   els.list.innerHTML = list.map(itemHTML).join('');
@@ -495,7 +496,7 @@ function hideOverlay(el) {
 }
 
 /* editor */
-const ed = { el: $('#editor'), id: null, base: null, choices: [], answer: null, dirty: false, armed: false, busy: false, field: null };
+const ed = { el: $('#editor'), id: null, base: null, choices: [], answer: null, dirty: false, armed: false, busy: false, field: null, shift: false };
 const FMT_FIELDS = '#edQ, #edExp, #edChoices input';
 function openEditor(p) {
   if (!cfg) { openSettings(); return; }
@@ -509,7 +510,8 @@ function openEditor(p) {
   const del = $('#edDelete');
   del.hidden = !p; del.disabled = false; del.textContent = '삭제'; delete del.dataset.armed;
   $('#edSaveNext').hidden = !!p;
-  $('#edErr').textContent = ''; ed.dirty = false; ed.armed = false; ed.field = null; setBusy(false);
+  $('#edErr').textContent = ''; ed.dirty = false; ed.armed = false; ed.field = null; ed.shift = false; setBusy(false);
+  renderKeys();
   renderChoices(); renderPreview();
   showOverlay(ed.el);
   $('#editor .sheet-body').scrollTop = 0;
@@ -548,6 +550,18 @@ function applyFmt(el, mark) {
   }
   el.focus();
   el.dispatchEvent(new Event('input', { bubbles: true }));
+}
+// 커서 위치(선택 영역이 있으면 그 자리)에 글자를 넣는다
+function insertText(el, text) {
+  if (!el) return;
+  const s = el.selectionStart ?? el.value.length, e = el.selectionEnd ?? el.value.length;
+  el.setRangeText(text, s, e, 'end');
+  el.focus();
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+}
+function renderKeys() {
+  ed.el.querySelectorAll('[data-ch]').forEach(b => { b.textContent = ed.shift ? b.dataset.ch.toUpperCase() : b.dataset.ch; });
+  ed.el.querySelector('[data-shift]').setAttribute('aria-pressed', String(ed.shift));
 }
 const fmtTarget = () => (ed.field && ed.field.isConnected ? ed.field : $('#edQ'));
 function setBusy(b) {
@@ -601,6 +615,13 @@ ed.el.addEventListener('click', e => {
   if (t === ed.el) { tryCloseEditor(); return; }
   const f = t.closest('[data-fmt]');
   if (f) { applyFmt(fmtTarget(), f.dataset.fmt === 'b' ? '**' : '__'); return; }
+  const k = t.closest('[data-ch]');
+  if (k) {
+    insertText(fmtTarget(), ed.shift ? k.dataset.ch.toUpperCase() : k.dataset.ch);
+    if (ed.shift) { ed.shift = false; renderKeys(); } // 대문자는 한 글자만
+    return;
+  }
+  if (t.closest('[data-shift]')) { ed.shift = !ed.shift; renderKeys(); return; }
   const a = t.closest('[data-ans]');
   if (a) { ed.answer = +a.dataset.ans; ed.dirty = true; renderChoices(); return; }
   const r = t.closest('[data-rm]');
@@ -611,8 +632,11 @@ ed.el.addEventListener('click', e => {
     ed.dirty = true; renderChoices(); renderPreview();
   }
 });
-// 서식 버튼을 눌러도 입력란의 포커스와 선택 영역이 유지되도록
-ed.el.querySelectorAll('[data-fmt]').forEach(b => b.addEventListener('mousedown', e => e.preventDefault()));
+// 도구 모음 버튼을 눌러도 입력란의 포커스(모바일 키보드)와 선택 영역이 유지되도록
+ed.el.querySelectorAll('.fmtbar button').forEach(b => {
+  b.addEventListener('pointerdown', e => e.preventDefault());
+  b.addEventListener('mousedown', e => e.preventDefault());
+});
 $('#edAddChoice').addEventListener('click', () => { ed.choices.push(''); renderChoices(); $(`[data-ci="${ed.choices.length - 1}"]`).focus(); });
 $('#edClose').addEventListener('click', tryCloseEditor);
 $('#edSave').addEventListener('click', () => saveEditor(false));

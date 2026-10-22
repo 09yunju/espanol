@@ -71,7 +71,7 @@ u { text-decoration-thickness: 1px; text-underline-offset: .22em; }
 .qtext { font-size: 1.06rem; line-height: 1.85; }
 
 /* OMR bubble */
-.bubble { width: 20px; height: 28px; border: 1.5px solid var(--red); border-radius: 50%; display: inline-grid; place-items: center; font: 600 .72rem/1 var(--sans); color: var(--red); flex: none; background: transparent; }
+.bubble { width: 24px; height: 24px; border: 1.5px solid var(--red); border-radius: 50%; display: inline-grid; place-items: center; font: 600 .72rem/1 var(--sans); color: var(--red); flex: none; background: transparent; }
 button.bubble { appearance: none; padding: 0; cursor: pointer; }
 .bubble.filled { background: var(--ink); border-color: var(--ink); color: var(--bg); }
 
@@ -139,10 +139,11 @@ button.bubble { appearance: none; padding: 0; cursor: pointer; }
 .sheet-foot { display: flex; gap: 8px; padding: 12px 20px; border-top: 1px solid var(--line); flex-wrap: wrap; }
 .sheet-foot .spacer { flex: 1; }
 .ed-choice { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; margin-bottom: 8px; }
-.ed-choice .bubble { width: 26px; height: 34px; font-size: .82rem; margin: 0 4px; }
-.fmtbar { display: flex; align-items: center; gap: 6px; padding: 8px 20px; border-bottom: 1px solid var(--line); }
-.fmtbar button { appearance: none; font: inherit; font-size: 1rem; width: 44px; height: 38px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); cursor: pointer; }
-.fmtbar .hint { margin: 0 0 0 6px; }
+.ed-choice .bubble { width: 32px; height: 32px; font-size: .82rem; margin: 0 4px; }
+.fmtbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 20px; border-bottom: 1px solid var(--line); }
+.fmtbar button { appearance: none; font: inherit; font-size: 1rem; min-width: 36px; height: 36px; padding: 0 4px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); cursor: pointer; touch-action: manipulation; }
+.fmtbar button[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--bg); }
+.fmtbar .sep { width: 1px; height: 22px; background: var(--line); margin: 0 2px; }
 .preview-box { border: 1px dashed var(--line); border-radius: 6px; padding: 12px 14px; }
 .preview-box .dchoices { margin-top: 10px; }
 .remember-hint { margin: -8px 0 20px; }
