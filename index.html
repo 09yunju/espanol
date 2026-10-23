@@ -30,6 +30,7 @@
       <nav class="seg" role="tablist" aria-label="화면">
         <button class="tab" role="tab" data-view="bank" aria-selected="true">문제</button>
         <button class="tab" role="tab" data-view="solve" aria-selected="false">풀기</button>
+        <button class="tab" role="tab" data-view="words" aria-selected="false">단어</button>
       </nav>
     </div>
   </div>
@@ -45,6 +46,15 @@
     <div id="empty"></div>
   </section>
   <section id="solve" hidden></section>
+  <section id="words" hidden>
+    <div id="wtoolbar" class="toolbar">
+      <input id="wq" type="search" placeholder="단어·뜻 검색" aria-label="단어 검색" autocomplete="off">
+      <button class="btn primary" data-action="new-word">새 단어</button>
+    </div>
+    <p id="wcount" class="count-line"></p>
+    <ul id="wlist" class="wlist"></ul>
+    <div id="wempty"></div>
+  </section>
 </main>
 
 <div id="editor" class="overlay" hidden>
@@ -53,12 +63,10 @@
       <h2 id="edTitle">새 문제</h2>
       <button class="icon" id="edClose" type="button" aria-label="닫기">✕</button>
     </div>
-    <div class="fmtbar" role="toolbar" aria-label="서식과 기호">
+    <div class="fmtbar" data-keys role="toolbar" aria-label="서식과 기호">
       <button type="button" data-fmt="b" aria-label="굵게" title="굵게 (Ctrl/⌘+B)"><strong>B</strong></button>
       <button type="button" data-fmt="u" aria-label="밑줄" title="밑줄 (Ctrl/⌘+U)"><u>U</u></button>
       <span class="sep" aria-hidden="true"></span>
-      <button type="button" data-ch="á" aria-label="á 입력">á</button><button type="button" data-ch="é" aria-label="é 입력">é</button><button type="button" data-ch="í" aria-label="í 입력">í</button><button type="button" data-ch="ó" aria-label="ó 입력">ó</button><button type="button" data-ch="ú" aria-label="ú 입력">ú</button><button type="button" data-ch="ü" aria-label="ü 입력">ü</button><button type="button" data-ch="ñ" aria-label="ñ 입력">ñ</button><button type="button" data-ch="¿" aria-label="¿ 입력">¿</button><button type="button" data-ch="¡" aria-label="¡ 입력">¡</button>
-      <button type="button" data-shift aria-pressed="false" aria-label="다음 글자 대문자" title="다음 한 글자를 대문자로">⇧</button>
     </div>
     <div class="sheet-body">
       <label class="field"><span>문제</span>
@@ -82,6 +90,56 @@
       <span class="spacer"></span>
       <button type="button" id="edSaveNext" class="btn">저장하고 새 문제</button>
       <button type="button" id="edSave" class="btn primary">저장</button>
+    </div>
+  </div>
+</div>
+
+<div id="cards" class="overlay cards-overlay" hidden>
+  <div class="cards" role="dialog" aria-modal="true" aria-label="단어 카드">
+    <div class="cards-head">
+      <button class="icon" id="cdClose" type="button" aria-label="닫기">✕</button>
+      <span id="cdPos" class="cd-pos"></span>
+      <button class="link" id="cdEdit" type="button">수정</button>
+    </div>
+    <div class="card-stage">
+      <div class="card" id="card" role="button" tabindex="0" aria-label="카드 뒤집기">
+        <div class="face front"><p class="cd-word serif" id="cdWord" lang="es"></p></div>
+        <div class="face back"><p class="cd-small serif" id="cdWordSmall" lang="es"></p><p class="cd-meaning" id="cdMeaning"></p></div>
+      </div>
+      <button class="speak" id="cdSpeak" type="button" aria-label="발음 듣기"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5H4z" fill="currentColor"/><path d="M15.5 9a4.2 4.2 0 0 1 0 6M18 6.5a7.8 7.8 0 0 1 0 11" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
+    </div>
+    <p class="cd-hint">카드를 누르면 뒤집혀요. 옆으로 밀면 다음 단어로 넘어가요.</p>
+    <div class="cards-nav">
+      <button class="btn" id="cdPrev" type="button">이전</button>
+      <button class="btn" id="cdNext" type="button">다음</button>
+    </div>
+  </div>
+</div>
+
+<div id="wordEditor" class="overlay" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="weTitle">
+    <div class="sheet-head">
+      <h2 id="weTitle">새 단어</h2>
+      <button class="icon" id="weClose" type="button" aria-label="닫기">✕</button>
+    </div>
+    <div class="fmtbar" data-keys role="toolbar" aria-label="기호"></div>
+    <div class="sheet-body">
+      <div class="field"><label for="weWord"><span class="flabel">단어</span></label>
+        <div class="word-row">
+          <input id="weWord" type="text" class="serif" lang="es" autocomplete="off" autocapitalize="off" spellcheck="false">
+          <button class="speak speak-sm" id="weSpeak" type="button" aria-label="발음 듣기"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5H4z" fill="currentColor"/><path d="M15.5 9a4.2 4.2 0 0 1 0 6M18 6.5a7.8 7.8 0 0 1 0 11" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
+        </div>
+      </div>
+      <label class="field"><span>뜻</span>
+        <textarea id="weMeaning" rows="3"></textarea>
+      </label>
+      <p id="weErr" class="err" role="alert"></p>
+    </div>
+    <div class="sheet-foot">
+      <button type="button" id="weDelete" class="btn danger">삭제</button>
+      <span class="spacer"></span>
+      <button type="button" id="weSaveNext" class="btn">저장하고 새 단어</button>
+      <button type="button" id="weSave" class="btn primary">저장</button>
     </div>
   </div>
 </div>

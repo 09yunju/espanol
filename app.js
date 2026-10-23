@@ -5,6 +5,8 @@ const API = 'https://api.github.com';
 const CIRCLE = 'M41 9 C30 4 13 9 8 24 C3 40 15 54 31 54 C46 54 56 42 53 26 C51 14 41 7 28 8';
 const SLASH = 'M12 50 C24 37 37 22 50 8';
 const STAT_FLUSH_AT = 5; // 풀이 기록은 이 개수만큼 모이면 한 번에 커밋
+const SYMBOLS = 'áéíóúüñ¿¡';
+const SPEAKER = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5H4z" fill="currentColor"/><path d="M15.5 9a4.2 4.2 0 0 1 0 6M18 6.5a7.8 7.8 0 0 1 0 11" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
 
 /* ================= utils ================= */
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -52,6 +54,7 @@ let cfg = repoCfg && token ? { ...repoCfg, token } : null;
 const files = {
   problems: { path: 'problems.json', data: null, sha: null, loaded: false },
   stats: { path: 'stats.json', data: null, sha: null, loaded: false },
+  words: { path: 'words.json', data: null, sha: null, loaded: false },
 };
 let pending = {}; // 아직 커밋 안 된 풀이 기록: id -> { tries, correct, last, lastAt }
 
@@ -83,6 +86,21 @@ function toFile(list) {
     })),
   };
 }
+function wordsFrom(data) {
+  const arr = data && Array.isArray(data.words) ? data.words : [];
+  const seen = new Set();
+  return arr.map((raw, i) => {
+    const w = raw && typeof raw === 'object' ? raw : {};
+    let id = String(w.id || ('w' + hash(String(w.word || '') + '#' + i)));
+    while (seen.has(id)) id += '_';
+    seen.add(id);
+    return { id, word: String(w.word || ''), meaning: String(w.meaning || ''), createdAt: Number(w.createdAt) || 0, updatedAt: Number(w.updatedAt) || 0 };
+  });
+}
+function wordsTo(list) {
+  return { version: 1, words: list.map(w => ({ id: w.id, word: w.word, meaning: w.meaning, createdAt: w.createdAt, updatedAt: w.updatedAt })) };
+}
+const codecs = { problems: [fromFile, toFile], words: [wordsFrom, wordsTo] };
 const upsert = (list, p) => { const i = list.findIndex(x => x.id === p.id); if (i >= 0) list[i] = p; else list.push(p); return list; };
 const playable = p => p.choices.length >= 2;
 const statsFrom = d => (d && d.stats && typeof d.stats === 'object' ? d.stats : {});
@@ -108,12 +126,13 @@ const pendingCount = () => Object.values(pending).reduce((a, d) => a + d.tries, 
 
 const state = {
   items: [], num: new Map(), ready: false, loadError: '',
-  view: 'bank', query: '', openId: null,
+  words: [], view: 'bank', query: '', wquery: '', openId: null,
   setup: { scope: 'all', shuffle: true }, session: null,
 };
 function recompute() {
   state.items = fromFile(files.problems.data);
   state.num = new Map(state.items.map((p, i) => [p.id, i + 1]));
+  state.words = wordsFrom(files.words.data);
 }
 
 /* ================= GitHub Contents API ================= */
@@ -213,9 +232,10 @@ function load() {
     setSync('loading');
     if (!state.ready) render();
     try {
-      const [p, s] = await Promise.all([readFile('problems'), readFile('stats')]);
+      const [p, s, w] = await Promise.all([readFile('problems'), readFile('stats'), readFile('words')]);
       Object.assign(files.problems, p, { loaded: true });
       Object.assign(files.stats, s, { loaded: true });
+      Object.assign(files.words, w, { loaded: true });
       state.loadError = ''; lastSync = Date.now();
       setSync('ok');
     } catch (e) {
@@ -227,10 +247,11 @@ function load() {
     }
   });
 }
-async function mutateProblems(fn, message) {
+async function mutateList(key, fn, message) {
+  const [from, to] = codecs[key];
   setSync('saving');
   try {
-    await exclusive(() => commit('problems', d => toFile(fn(fromFile(d))), message));
+    await exclusive(() => commit(key, d => to(fn(from(d))), message));
     lastSync = Date.now(); setSync('ok');
   } catch (e) {
     setSync('error', e.message);
@@ -239,6 +260,7 @@ async function mutateProblems(fn, message) {
     recompute(); render();
   }
 }
+const mutateProblems = (fn, message) => mutateList('problems', fn, message);
 function flushStats() {
   if (!cfg) return Promise.resolve();
   return exclusive(async () => {
@@ -273,19 +295,22 @@ function recordStat(id, ok) {
 const label = p => plain(p.question).slice(0, 40);
 
 /* ================= views ================= */
-const els = { bank: $('#bank'), solve: $('#solve'), toolbar: $('#toolbar'), list: $('#list'), empty: $('#empty'), q: $('#q') };
+const els = { bank: $('#bank'), solve: $('#solve'), words: $('#words'), toolbar: $('#toolbar'), list: $('#list'), empty: $('#empty'), q: $('#q') };
 const connectHTML = () => `<div class="empty"><p>${repoCfg && !token ? '토큰을 다시 입력해 주세요.' : '문제를 저장할 GitHub 저장소를 연결해 주세요.'}</p><button class="btn primary" data-action="settings">${repoCfg && !token ? '토큰 입력' : '연결하기'}</button></div>`;
 function setView(v) {
   state.view = v;
-  els.bank.hidden = v !== 'bank'; els.solve.hidden = v !== 'solve';
+  els.bank.hidden = v !== 'bank'; els.solve.hidden = v !== 'solve'; els.words.hidden = v !== 'words';
   document.querySelectorAll('.tab').forEach(t => t.setAttribute('aria-selected', String(t.dataset.view === v)));
   if (v === 'bank') renderBank();
+  else if (v === 'words') renderWords();
   else if (!state.session || state.session.phase === 'setup') renderSetup();
   window.scrollTo(0, 0);
 }
 function render() {
   if (state.view === 'bank') renderBank();
+  else if (state.view === 'words') renderWords();
   else if (!state.session || state.session.phase === 'setup') renderSetup();
+  if (!$('#cards').hidden) renderCard(true);
   renderSync();
 }
 function choicesHTML(p) {
@@ -332,18 +357,24 @@ function detailHTML(p) {
   if (p.explanation) h += `<div class="explain"><h4>해설</h4><div class="rich">${fmt(p.explanation)}</div></div>`;
   return h + '<div class="row-actions"><button class="btn small" data-action="edit">수정</button><button class="btn small danger" data-action="delete">삭제</button></div>';
 }
-function deleteProblem(btn, id, after) {
-  const p = state.items.find(x => x.id === id);
-  if (!p) return;
+// 한 번 누르면 확인 상태, 3초 안에 한 번 더 누르면 실행
+function armDelete(btn, run, after) {
   if (!btn.dataset.armed) {
     btn.dataset.armed = '1'; btn.textContent = '한 번 더 누르면 삭제';
     setTimeout(() => { if (btn.isConnected && btn.dataset.armed === '1') { delete btn.dataset.armed; btn.textContent = '삭제'; } }, 3000);
     return;
   }
+  if (btn.dataset.armed !== '1') return;
   btn.dataset.armed = 'busy'; btn.disabled = true; btn.textContent = '삭제 중…';
-  mutateProblems(list => list.filter(x => x.id !== id), `문제 삭제: ${label(p)}`)
-    .then(() => { if (state.openId === id) state.openId = null; toast('삭제했어요'); after && after(); renderBank(); })
+  run()
+    .then(() => { toast('삭제했어요'); after && after(); })
     .catch(e => { toast(e.message); if (btn.isConnected) { btn.disabled = false; delete btn.dataset.armed; btn.textContent = '삭제'; } });
+}
+function deleteProblem(btn, id, after) {
+  const p = state.items.find(x => x.id === id);
+  if (!p) return;
+  armDelete(btn, () => mutateProblems(list => list.filter(x => x.id !== id), `문제 삭제: ${label(p)}`),
+    () => { if (state.openId === id) state.openId = null; after && after(); renderBank(); });
 }
 els.bank.addEventListener('click', e => {
   const a = e.target.closest('[data-action]');
@@ -492,11 +523,43 @@ els.solve.addEventListener('change', e => { if (e.target.id === 'shuffle') state
 function showOverlay(el) { el.hidden = false; document.body.classList.add('locked'); }
 function hideOverlay(el) {
   el.hidden = true;
-  if ($('#editor').hidden && $('#settings').hidden) document.body.classList.remove('locked');
+  if (['#editor', '#settings', '#cards', '#wordEditor'].every(sel => $(sel).hidden)) document.body.classList.remove('locked');
 }
 
 /* editor */
-const ed = { el: $('#editor'), id: null, base: null, choices: [], answer: null, dirty: false, armed: false, busy: false, field: null, shift: false };
+/* 서식·기호 도구 모음: 마지막으로 커서를 둔 입력란에 적용 */
+const KEYS_HTML = [...SYMBOLS].map(c => `<button type="button" data-ch="${c}" aria-label="${c} 입력">${c}</button>`).join('') +
+  '<button type="button" data-shift aria-pressed="false" aria-label="다음 글자 대문자" title="다음 한 글자를 대문자로">⇧</button>';
+document.querySelectorAll('.fmtbar[data-keys]').forEach(b => b.insertAdjacentHTML('beforeend', KEYS_HTML));
+function setupToolbar(root, fieldsSel, fallbackSel) {
+  const bar = root.querySelector('.fmtbar');
+  const t = { field: null, shift: false };
+  const target = () => (t.field && t.field.isConnected ? t.field : root.querySelector(fallbackSel));
+  const renderShift = () => {
+    bar.querySelectorAll('[data-ch]').forEach(b => { b.textContent = t.shift ? b.dataset.ch.toUpperCase() : b.dataset.ch; });
+    bar.querySelector('[data-shift]').setAttribute('aria-pressed', String(t.shift));
+  };
+  root.addEventListener('focusin', e => { if (e.target.matches(fieldsSel)) t.field = e.target; });
+  // 버튼을 눌러도 입력란의 포커스(모바일 키보드)와 선택 영역이 유지되도록
+  bar.querySelectorAll('button').forEach(b => {
+    b.addEventListener('pointerdown', e => e.preventDefault());
+    b.addEventListener('mousedown', e => e.preventDefault());
+  });
+  bar.addEventListener('click', e => {
+    const f = e.target.closest('[data-fmt]');
+    if (f) { applyFmt(target(), f.dataset.fmt === 'b' ? '**' : '__'); return; }
+    const k = e.target.closest('[data-ch]');
+    if (k) {
+      insertText(target(), t.shift ? k.dataset.ch.toUpperCase() : k.dataset.ch);
+      if (t.shift) { t.shift = false; renderShift(); } // 대문자는 한 글자만
+      return;
+    }
+    if (e.target.closest('[data-shift]')) { t.shift = !t.shift; renderShift(); }
+  });
+  return { reset() { t.field = null; t.shift = false; renderShift(); } };
+}
+
+const ed = { el: $('#editor'), id: null, base: null, choices: [], answer: null, dirty: false, armed: false, busy: false };
 const FMT_FIELDS = '#edQ, #edExp, #edChoices input';
 function openEditor(p) {
   if (!cfg) { openSettings(); return; }
@@ -510,8 +573,8 @@ function openEditor(p) {
   const del = $('#edDelete');
   del.hidden = !p; del.disabled = false; del.textContent = '삭제'; delete del.dataset.armed;
   $('#edSaveNext').hidden = !!p;
-  $('#edErr').textContent = ''; ed.dirty = false; ed.armed = false; ed.field = null; ed.shift = false; setBusy(false);
-  renderKeys();
+  $('#edErr').textContent = ''; ed.dirty = false; ed.armed = false; setBusy(false);
+  edBar.reset();
   renderChoices(); renderPreview();
   showOverlay(ed.el);
   $('#editor .sheet-body').scrollTop = 0;
@@ -559,11 +622,6 @@ function insertText(el, text) {
   el.focus();
   el.dispatchEvent(new Event('input', { bubbles: true }));
 }
-function renderKeys() {
-  ed.el.querySelectorAll('[data-ch]').forEach(b => { b.textContent = ed.shift ? b.dataset.ch.toUpperCase() : b.dataset.ch; });
-  ed.el.querySelector('[data-shift]').setAttribute('aria-pressed', String(ed.shift));
-}
-const fmtTarget = () => (ed.field && ed.field.isConnected ? ed.field : $('#edQ'));
 function setBusy(b) {
   ed.busy = b;
   $('#edSave').disabled = b; $('#edSaveNext').disabled = b;
@@ -604,7 +662,7 @@ async function saveEditor(andNext) {
   if (andNext) { openEditor(); toast('저장했어요. 다음 문제를 입력하세요.'); }
   else { hideOverlay(ed.el); toast(base ? '수정했어요' : '저장했어요'); }
 }
-ed.el.addEventListener('focusin', e => { if (e.target.matches(FMT_FIELDS)) ed.field = e.target; });
+const edBar = setupToolbar(ed.el, FMT_FIELDS, '#edQ');
 ed.el.addEventListener('input', e => {
   ed.dirty = true;
   if (e.target.dataset.ci != null) ed.choices[+e.target.dataset.ci] = e.target.value;
@@ -613,15 +671,6 @@ ed.el.addEventListener('input', e => {
 ed.el.addEventListener('click', e => {
   const t = e.target;
   if (t === ed.el) { tryCloseEditor(); return; }
-  const f = t.closest('[data-fmt]');
-  if (f) { applyFmt(fmtTarget(), f.dataset.fmt === 'b' ? '**' : '__'); return; }
-  const k = t.closest('[data-ch]');
-  if (k) {
-    insertText(fmtTarget(), ed.shift ? k.dataset.ch.toUpperCase() : k.dataset.ch);
-    if (ed.shift) { ed.shift = false; renderKeys(); } // 대문자는 한 글자만
-    return;
-  }
-  if (t.closest('[data-shift]')) { ed.shift = !ed.shift; renderKeys(); return; }
   const a = t.closest('[data-ans]');
   if (a) { ed.answer = +a.dataset.ans; ed.dirty = true; renderChoices(); return; }
   const r = t.closest('[data-rm]');
@@ -632,16 +681,194 @@ ed.el.addEventListener('click', e => {
     ed.dirty = true; renderChoices(); renderPreview();
   }
 });
-// 도구 모음 버튼을 눌러도 입력란의 포커스(모바일 키보드)와 선택 영역이 유지되도록
-ed.el.querySelectorAll('.fmtbar button').forEach(b => {
-  b.addEventListener('pointerdown', e => e.preventDefault());
-  b.addEventListener('mousedown', e => e.preventDefault());
-});
 $('#edAddChoice').addEventListener('click', () => { ed.choices.push(''); renderChoices(); $(`[data-ci="${ed.choices.length - 1}"]`).focus(); });
 $('#edClose').addEventListener('click', tryCloseEditor);
 $('#edSave').addEventListener('click', () => saveEditor(false));
 $('#edSaveNext').addEventListener('click', () => saveEditor(true));
 $('#edDelete').addEventListener('click', e => deleteProblem(e.currentTarget, ed.id, () => hideOverlay(ed.el)));
+
+/* ================= words ================= */
+const W = { tb: $('#wtoolbar'), list: $('#wlist'), empty: $('#wempty'), count: $('#wcount'), q: $('#wq') };
+function wordList() {
+  const q = fold(state.wquery.trim());
+  return q ? state.words.filter(w => fold(w.word + '\n' + w.meaning).includes(q)) : state.words;
+}
+function renderWords() {
+  W.tb.hidden = !cfg || !state.ready || (!!state.loadError && !files.words.loaded);
+  const clear = () => { W.list.innerHTML = ''; W.count.textContent = ''; };
+  if (!cfg) { clear(); W.empty.innerHTML = connectHTML(); return; }
+  if (!state.ready) { clear(); W.empty.innerHTML = '<p class="muted empty">불러오는 중…</p>'; return; }
+  if (!state.words.length) {
+    clear();
+    W.empty.innerHTML = state.loadError && !files.words.loaded
+      ? `<div class="empty"><p>단어를 불러오지 못했어요. ${esc(state.loadError)}</p><div class="row-actions"><button class="btn primary" data-action="reload">다시 불러오기</button><button class="btn" data-action="settings">설정</button></div></div>`
+      : '<div class="empty"><p>아직 등록한 단어가 없어요.</p><button class="btn primary" data-action="new-word">첫 단어 등록하기</button></div>';
+    return;
+  }
+  const list = wordList();
+  W.count.textContent = state.wquery.trim() ? `단어 ${state.words.length}개 중 ${list.length}개` : `단어 ${state.words.length}개`;
+  W.empty.innerHTML = list.length ? '' : '<p class="muted empty">검색 결과가 없어요.</p>';
+  W.list.innerHTML = list.map(w => `<li class="witem" data-id="${esc(w.id)}">
+    <button class="witem-main" data-action="card"><span class="wword" lang="es">${esc(w.word)}</span><span class="wmean">${esc(w.meaning.replace(/\s+/g, ' '))}</span></button>
+    <button class="speak speak-sm" data-action="speak" aria-label="${esc(w.word)} 발음 듣기">${SPEAKER}</button>
+  </li>`).join('');
+}
+els.words.addEventListener('click', e => {
+  const a = e.target.closest('[data-action]');
+  if (!a) return;
+  const id = a.closest('.witem')?.dataset.id;
+  const w = id && state.words.find(x => x.id === id);
+  switch (a.dataset.action) {
+    case 'new-word': openWordEditor(); break;
+    case 'settings': openSettings(); break;
+    case 'reload': load(); break;
+    case 'card': openCards(wordList().map(x => x.id), id); break;
+    case 'speak': if (w) speak(w.word, a); break;
+  }
+});
+W.q.addEventListener('input', () => { state.wquery = W.q.value; renderWords(); });
+
+/* 발음: 브라우저 내장 음성 합성(Web Speech API), 스페인어 음성 우선 */
+const tts = { voice: null, warned: false };
+const hasTTS = 'speechSynthesis' in window && typeof window.SpeechSynthesisUtterance === 'function';
+function pickVoice() {
+  const vs = speechSynthesis.getVoices();
+  tts.voice = vs.find(v => /^es[-_]ES$/i.test(v.lang)) || vs.find(v => /^es([-_]|$)/i.test(v.lang)) || null;
+  return vs.length;
+}
+if (hasTTS) { pickVoice(); speechSynthesis.addEventListener?.('voiceschanged', pickVoice); }
+function speak(text, btn) {
+  if (!hasTTS) { toast('이 브라우저는 음성 읽기를 지원하지 않아요.'); return; }
+  const loaded = pickVoice();
+  if (loaded && !tts.voice && !tts.warned) { tts.warned = true; toast('스페인어 음성을 찾지 못했어요. 기기 설정에서 스페인어 음성을 추가해 주세요.'); }
+  if (speechSynthesis.speaking || speechSynthesis.pending) speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(plain(text));
+  u.lang = tts.voice ? tts.voice.lang.replace('_', '-') : 'es-ES';
+  if (tts.voice) u.voice = tts.voice;
+  u.rate = 0.9;
+  if (btn) {
+    document.querySelectorAll('.speak.playing').forEach(b => b.classList.remove('playing'));
+    btn.classList.add('playing');
+    u.onend = u.onerror = () => btn.classList.remove('playing');
+  }
+  speechSynthesis.speak(u);
+}
+
+/* 카드: 앞면 단어, 누르면 뒤집혀 뜻 */
+const cd = { el: $('#cards'), card: $('#card'), ids: [], idx: 0, flipped: false, sx: 0, sy: 0, swiped: false };
+const cardWord = () => state.words.find(w => w.id === cd.ids[cd.idx]);
+function openCards(ids, startId) {
+  if (!ids.length) return;
+  cd.ids = ids.slice(); cd.idx = Math.max(0, ids.indexOf(startId)); cd.flipped = false;
+  showOverlay(cd.el);
+  renderCard(true);
+  cd.card.focus({ preventScroll: true });
+}
+function renderCard(instant) {
+  cd.ids = cd.ids.filter(id => state.words.some(w => w.id === id));
+  if (!cd.ids.length) { hideOverlay(cd.el); return; }
+  cd.idx = Math.min(cd.idx, cd.ids.length - 1);
+  const w = cardWord();
+  if (instant) cd.card.classList.add('no-anim'); // 다음 카드로 넘길 때 뒷면(뜻)이 비치지 않게
+  cd.card.classList.toggle('flipped', cd.flipped);
+  $('#cdWord').textContent = w.word;
+  $('#cdWordSmall').textContent = w.word;
+  $('#cdMeaning').textContent = w.meaning;
+  $('.face.front', cd.card).setAttribute('aria-hidden', String(cd.flipped));
+  $('.face.back', cd.card).setAttribute('aria-hidden', String(!cd.flipped));
+  $('#cdPos').textContent = `${cd.idx + 1} / ${cd.ids.length}`;
+  $('#cdPrev').disabled = cd.idx === 0;
+  $('#cdNext').disabled = cd.idx === cd.ids.length - 1;
+  if (instant) { void cd.card.offsetWidth; cd.card.classList.remove('no-anim'); }
+}
+function flip() { cd.flipped = !cd.flipped; renderCard(false); }
+function go(d) {
+  const n = cd.idx + d;
+  if (n < 0 || n >= cd.ids.length) return;
+  cd.idx = n; cd.flipped = false; renderCard(true);
+}
+cd.card.addEventListener('click', () => { if (cd.swiped) { cd.swiped = false; return; } flip(); });
+cd.card.addEventListener('keydown', e => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); flip(); } });
+const stage = $('.card-stage');
+stage.addEventListener('touchstart', e => { const t = e.changedTouches[0]; cd.sx = t.clientX; cd.sy = t.clientY; }, { passive: true });
+stage.addEventListener('touchend', e => {
+  const t = e.changedTouches[0], dx = t.clientX - cd.sx, dy = t.clientY - cd.sy;
+  if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+    cd.swiped = true; setTimeout(() => { cd.swiped = false; }, 400);
+    go(dx < 0 ? 1 : -1);
+  }
+}, { passive: true });
+$('#cdSpeak').addEventListener('click', e => { const w = cardWord(); if (w) speak(w.word, e.currentTarget); });
+$('#cdPrev').addEventListener('click', () => go(-1));
+$('#cdNext').addEventListener('click', () => go(1));
+$('#cdClose').addEventListener('click', () => hideOverlay(cd.el));
+$('#cdEdit').addEventListener('click', () => { const w = cardWord(); if (w) openWordEditor(w); });
+
+/* 단어 편집 */
+const we = { el: $('#wordEditor'), id: null, base: null, dirty: false, armed: false, busy: false, dup: false };
+const weBar = setupToolbar(we.el, '#weWord, #weMeaning', '#weWord');
+const sameWord = (a, b) => a.normalize('NFC').toLowerCase() === b.normalize('NFC').toLowerCase();
+function openWordEditor(w) {
+  if (!cfg) { openSettings(); return; }
+  we.id = w ? w.id : null; we.base = w || null;
+  $('#weTitle').textContent = w ? '단어 수정' : '새 단어';
+  $('#weWord').value = w ? w.word : '';
+  $('#weMeaning').value = w ? w.meaning : '';
+  const del = $('#weDelete');
+  del.hidden = !w; del.disabled = false; del.textContent = '삭제'; delete del.dataset.armed;
+  $('#weSaveNext').hidden = !!w;
+  $('#weErr').textContent = ''; we.dirty = false; we.armed = false; we.dup = false; weBusy(false);
+  weBar.reset();
+  showOverlay(we.el);
+  setTimeout(() => $('#weWord').focus({ preventScroll: true }), 40);
+}
+function weBusy(b) {
+  we.busy = b;
+  $('#weSave').disabled = b; $('#weSaveNext').disabled = b;
+  $('#weSave').textContent = b ? '저장 중…' : '저장';
+}
+function tryCloseWordEditor() {
+  if (we.busy) return;
+  if (we.dirty && !we.armed) {
+    we.armed = true; $('#weErr').textContent = '저장하지 않은 내용이 있어요. 닫으려면 한 번 더 누르세요.';
+    setTimeout(() => { we.armed = false; }, 4000);
+    return;
+  }
+  hideOverlay(we.el);
+}
+async function saveWord(andNext) {
+  if (we.busy) return;
+  const err = m => { $('#weErr').textContent = m; };
+  const word = $('#weWord').value.trim().replace(/\s+/g, ' ');
+  const meaning = $('#weMeaning').value.trim();
+  if (!word) return err('단어를 입력해 주세요.');
+  if (!meaning) return err('뜻을 입력해 주세요.');
+  const dupOf = state.words.find(x => x.id !== we.id && sameWord(x.word, word));
+  if (dupOf && !we.dup) { we.dup = true; return err(`이미 등록된 단어예요 (${dupOf.word}). 그래도 저장하려면 한 번 더 누르세요.`); }
+  const now = Date.now(), base = we.base;
+  const w = { id: we.id || newId().replace(/^p/, 'w'), word, meaning, createdAt: base ? base.createdAt || now : now, updatedAt: now };
+  err(''); weBusy(true);
+  try {
+    await mutateList('words', list => upsert(list, w), `${base ? '단어 수정' : '단어 추가'}: ${word}`);
+  } catch (e) {
+    weBusy(false);
+    return err(`저장하지 못했어요. ${e.message}`);
+  }
+  weBusy(false);
+  if (andNext) { openWordEditor(); toast('저장했어요. 다음 단어를 입력하세요.'); }
+  else { hideOverlay(we.el); toast(base ? '수정했어요' : '저장했어요'); }
+}
+we.el.addEventListener('input', e => { we.dirty = true; if (e.target.id === 'weWord') we.dup = false; });
+we.el.addEventListener('click', e => { if (e.target === we.el) tryCloseWordEditor(); });
+$('#weClose').addEventListener('click', tryCloseWordEditor);
+$('#weSave').addEventListener('click', () => saveWord(false));
+$('#weSaveNext').addEventListener('click', () => saveWord(true));
+$('#weSpeak').addEventListener('click', e => { const v = $('#weWord').value.trim(); if (v) speak(v, e.currentTarget); });
+$('#weWord').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('#weMeaning').focus(); } });
+$('#weDelete').addEventListener('click', e => {
+  const w = we.base;
+  if (w) armDelete(e.currentTarget, () => mutateList('words', list => list.filter(x => x.id !== w.id), `단어 삭제: ${w.word}`), () => hideOverlay(we.el));
+});
 
 /* settings */
 const st = { el: $('#settings') };
@@ -735,6 +962,18 @@ $('#syncBtn').addEventListener('click', openSettings);
 document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => setView(t.dataset.view)));
 document.addEventListener('keydown', e => {
   if (!st.el.hidden) { if (e.key === 'Escape') hideOverlay(st.el); return; }
+  if (!we.el.hidden) {
+    if (e.key === 'Escape') tryCloseWordEditor();
+    else if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); saveWord(false); }
+    return;
+  }
+  if (!cd.el.hidden && $('#editor').hidden) {
+    if (e.key === 'Escape') hideOverlay(cd.el);
+    else if (e.key === 'ArrowRight') go(1);
+    else if (e.key === 'ArrowLeft') go(-1);
+    else if (e.key === ' ' && !e.target.closest('button, #card')) { e.preventDefault(); flip(); }
+    return;
+  }
   if (!ed.el.hidden) {
     const mod = e.metaKey || e.ctrlKey, k = e.key.toLowerCase();
     if (e.key === 'Escape') tryCloseEditor();
@@ -759,10 +998,10 @@ document.addEventListener('keydown', e => {
 document.addEventListener('visibilitychange', () => {
   if (!cfg) return;
   if (document.visibilityState === 'hidden') flushStats();
-  else if (Date.now() - lastSync > 60000 && ed.el.hidden) load();
+  else if (Date.now() - lastSync > 60000 && ed.el.hidden && we.el.hidden) load();
 });
 window.addEventListener('pagehide', () => { flushStats(); });
-function fromHash() { const h = location.hash.slice(1); if (h === 'solve' || h === 'bank') setView(h); }
+function fromHash() { const h = location.hash.slice(1); if (h === 'solve' || h === 'bank' || h === 'words') setView(h); }
 window.addEventListener('hashchange', fromHash);
 
 render();
