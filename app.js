@@ -689,9 +689,12 @@ $('#edDelete').addEventListener('click', e => deleteProblem(e.currentTarget, ed.
 
 /* ================= words ================= */
 const W = { tb: $('#wtoolbar'), list: $('#wlist'), empty: $('#wempty'), count: $('#wcount'), q: $('#wq') };
+// 스페인어 알파벳순(ñ는 n 다음, 강세·대소문자는 같은 글자로, ¿¡ 같은 기호는 무시)
+const collator = new Intl.Collator('es', { ignorePunctuation: true });
 function wordList() {
   const q = fold(state.wquery.trim());
-  return q ? state.words.filter(w => fold(w.word + '\n' + w.meaning).includes(q)) : state.words;
+  const list = q ? state.words.filter(w => fold(w.word + '\n' + w.meaning).includes(q)) : state.words.slice();
+  return list.sort((a, b) => collator.compare(a.word, b.word));
 }
 function renderWords() {
   W.tb.hidden = !cfg || !state.ready || (!!state.loadError && !files.words.loaded);
@@ -757,9 +760,12 @@ function speak(text, btn) {
 /* 카드: 앞면 단어, 누르면 뒤집혀 뜻 */
 const cd = { el: $('#cards'), card: $('#card'), ids: [], idx: 0, flipped: false, sx: 0, sy: 0, swiped: false };
 const cardWord = () => state.words.find(w => w.id === cd.ids[cd.idx]);
+// 누른 단어가 첫 장, 나머지는 무작위 순서. 한 바퀴를 다 보면 다시 섞는다.
 function openCards(ids, startId) {
   if (!ids.length) return;
-  cd.ids = ids.slice(); cd.idx = Math.max(0, ids.indexOf(startId)); cd.flipped = false;
+  const rest = shuffle(ids.filter(id => id !== startId));
+  cd.ids = ids.includes(startId) ? [startId, ...rest] : rest;
+  cd.idx = 0; cd.flipped = false;
   showOverlay(cd.el);
   renderCard(true);
   cd.card.focus({ preventScroll: true });
@@ -778,13 +784,19 @@ function renderCard(instant) {
   $('.face.back', cd.card).setAttribute('aria-hidden', String(!cd.flipped));
   $('#cdPos').textContent = `${cd.idx + 1} / ${cd.ids.length}`;
   $('#cdPrev').disabled = cd.idx === 0;
-  $('#cdNext').disabled = cd.idx === cd.ids.length - 1;
+  $('#cdNext').disabled = cd.ids.length < 2;
   if (instant) { void cd.card.offsetWidth; cd.card.classList.remove('no-anim'); }
 }
 function flip() { cd.flipped = !cd.flipped; renderCard(false); }
 function go(d) {
-  const n = cd.idx + d;
-  if (n < 0 || n >= cd.ids.length) return;
+  let n = cd.idx + d;
+  if (n < 0 || cd.ids.length < 2) return;
+  if (n >= cd.ids.length) { // 새 바퀴: 다시 섞되 방금 본 단어가 바로 이어지지 않게
+    const cur = cd.ids[cd.idx], next = shuffle(cd.ids.slice());
+    if (next[0] === cur) [next[0], next[1]] = [next[1], next[0]];
+    cd.ids = next; n = 0;
+    toast('한 바퀴 다 봤어요. 다시 섞을게요.');
+  }
   cd.idx = n; cd.flipped = false; renderCard(true);
 }
 cd.card.addEventListener('click', () => { if (cd.swiped) { cd.swiped = false; return; } flip(); });
